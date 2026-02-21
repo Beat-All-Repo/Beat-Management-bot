@@ -1,229 +1,153 @@
-import random
-
-from telegram import Update
+import requests
+from telegram import Update, ParseMode
 from telegram.ext import CallbackContext
 
 from FallenRobot import dispatcher
 from FallenRobot.modules.disable import DisableAbleCommandHandler
 
-reactions = [
-    "( ͡° ͜ʖ ͡°)",
-    "( . •́ _ʖ •̀ .)",
-    "( ಠ ͜ʖ ಠ)",
-    "( ͡ ͜ʖ ͡ )",
-    "(ʘ ͜ʖ ʘ)",
-    "ヾ(´〇`)ﾉ♪♪♪",
-    "ヽ(o´∀`)ﾉ♪♬",
-    "♪♬((d⌒ω⌒b))♬♪",
-    "└(＾＾)┐",
-    "(￣▽￣)/♫•*¨*•.¸¸♪",
-    "ヾ(⌐■_■)ノ♪",
-    "乁( • ω •乁)",
-    "♬♫♪◖(● o ●)◗♪♫♬",
-    "(っ˘ڡ˘ς)",
-    "( ˘▽˘)っ♨",
-    "(　・ω・)⊃-[二二]",
-    "(*´ー`)旦 旦(￣ω￣*)",
-    "( ￣▽￣)[] [](≧▽≦ )",
-    "(*￣▽￣)旦 且(´∀`*)",
-    "(ノ ˘_˘)ノ　ζ|||ζ　ζ|||ζ　ζ|||ζ",
-    "(ノ°∀°)ノ⌒･*:.｡. .｡.:*･゜ﾟ･*☆",
-    "(⊃｡•́‿•̀｡)⊃━✿✿✿✿✿✿",
-    "(∩` ﾛ ´)⊃━炎炎炎炎炎",
-    "( ・∀・)・・・--------☆",
-    "( -ω-)／占~~~~~",
-    "○∞∞∞∞ヽ(^ー^ )",
-    "(*＾＾)/~~~~~~~~~~◎",
-    "((( ￣□)_／",
-    "(ﾒ￣▽￣)︻┳═一",
-    "ヽ( ･∀･)ﾉ_θ彡☆Σ(ノ `Д´)ノ",
-    "(*`0´)θ☆(メ°皿°)ﾉ",
-    "(; -_-)――――――C<―_-)",
-    "ヽ(>_<ヽ) ―⊂|=0ヘ(^‿^ )",
-    "(҂` ﾛ ´)︻デ═一 ＼(º □ º l|l)/",
-    "/( .□.)＼ ︵╰(°益°)╯︵ /(.□. /)",
-    "(`⌒*)O-(`⌒´Q)",
-    "(っ•﹏•)っ ✴==≡눈٩(`皿´҂)ง",
-    "ヾ(・ω・)メ(・ω・)ノ",
-    "(*^ω^)八(⌒▽⌒)八(-‿‿- )ヽ",
-    "ヽ( ⌒ω⌒)人(=^‥^= )ﾉ",
-    "｡*:☆(・ω・人・ω・)｡:゜☆｡",
-    "(°(°ω(°ω°(☆ω☆)°ω°)ω°)°)",
-    "(っ˘▽˘)(˘▽˘)˘▽˘ς)",
-    "(*＾ω＾)人(＾ω＾*)",
-    "＼(▽￣ \ (￣▽￣) / ￣▽)／",
-    "(￣Θ￣)",
-    "＼( ˋ Θ ´ )／",
-    "( ´(00)ˋ )",
-    "＼(￣(oo)￣)／",
-    "／(≧ x ≦)＼",
-    "／(=･ x ･=)＼",
-    "(=^･ω･^=)",
-    "(= ; ｪ ; =)",
-    "(=⌒‿‿⌒=)",
-    "(＾• ω •＾)",
-    "ଲ(ⓛ ω ⓛ)ଲ",
-    "ଲ(ⓛ ω ⓛ)ଲ",
-    "(^◔ᴥ◔^)",
-    "[(－－)]..zzZ",
-    "(￣o￣) zzZZzzZZ",
-    "(＿ ＿*) Z z z",
-    "☆ﾐ(o*･ω･)ﾉ",
-    "ε=ε=ε=ε=┌(;￣▽￣)┘",
-    "ε===(っ≧ω≦)っ",
-    "__φ(．．)",
-    "ヾ( `ー´)シφ__",
-    "( ^▽^)ψ__",
-    "|･ω･)",
-    "|д･)",
-    "┬┴┬┴┤･ω･)ﾉ",
-    "|･д･)ﾉ",
-    "(*￣ii￣)",
-    "(＾〃＾)",
-    "m(_ _)m",
-    "人(_ _*)",
-    "(シ. .)シ",
-    "(^_~)",
-    "(>ω^)",
-    "(^_<)〜☆",
-    "(^_<)",
-    "(づ￣ ³￣)づ",
-    "(⊃｡•́‿•̀｡)⊃",
-    "⊂(´• ω •`⊂)",
-    "(*・ω・)ﾉ",
-    "(^-^*)/",
-    "ヾ(*'▽'*)",
-    "(^０^)ノ",
-    "(*°ｰ°)ﾉ",
-    "(￣ω￣)/",
-    "(≧▽≦)/",
-    "w(°ｏ°)w",
-    "(⊙_⊙)",
-    "(°ロ°) !",
-    "∑(O_O;)",
-    "(￢_￢)",
-    "(¬_¬ )",
-    "(↼_↼)",
-    "(￣ω￣;)",
-    "┐('～`;)┌",
-    "(・_・;)",
-    "(＠_＠)",
-    "(•ิ_•ิ)?",
-    "ヽ(ー_ー )ノ",
-    "┐(￣ヘ￣)┌",
-    "┐(￣～￣)┌",
-    "┐( ´ д ` )┌",
-    "╮(︶▽︶)╭",
-    "ᕕ( ᐛ )ᕗ",
-    "(ノωヽ)",
-    "(″ロ゛)",
-    "(/ω＼)",
-    "(((＞＜)))",
-    "~(>_<~)",
-    "(×_×)",
-    "(×﹏×)",
-    "(ノ_<。)",
-    "(μ_μ)",
-    "o(TヘTo)",
-    "( ﾟ，_ゝ｀)",
-    "( ╥ω╥ )",
-    "(／ˍ・、)",
-    "(つω`｡)",
-    "(T_T)",
-    "o(〒﹏〒)o",
-    "(＃`Д´)",
-    "(・`ω´・)",
-    "( `ε´ )",
-    "(ﾒ` ﾛ ´)",
-    "Σ(▼□▼メ)",
-    "(҂ `з´ )",
-    "٩(╬ʘ益ʘ╬)۶",
-    "↑_(ΦwΦ)Ψ",
-    "(ﾉಥ益ಥ)ﾉ",
-    "(＃＞＜)",
-    "(；￣Д￣)",
-    "(￢_￢;)",
-    "(＾＾＃)",
-    "(￣︿￣)",
-    "ヾ( ￣O￣)ツ",
-    "(ᗒᗣᗕ)՞",
-    "(ノ_<。)ヾ(´ ▽ ` )",
-    "ヽ(￣ω￣(。。 )ゝ",
-    "(ﾉ_；)ヾ(´ ∀ ` )",
-    "(´-ω-`( _ _ )",
-    "(⌒_⌒;)",
-    "(*/_＼)",
-    "( ◡‿◡ *)",
-    "(//ω//)",
-    "(￣▽￣*)ゞ",
-    "(„ಡωಡ„)",
-    "(ﾉ´ з `)ノ",
-    "(♡-_-♡)",
-    "(─‿‿─)♡",
-    "(´ ω `♡)",
-    "(ღ˘⌣˘ღ)",
-    "(´• ω •`) ♡",
-    "╰(*´︶`*)╯♡",
-    "(≧◡≦) ♡",
-    "♡ (˘▽˘>ԅ( ˘⌣˘)",
-    "σ(≧ε≦σ) ♡",
-    "(˘∀˘)/(μ‿μ) ❤",
-    "Σ>―(〃°ω°〃)♡→",
-    "(* ^ ω ^)",
-    "(o^▽^o)",
-    "ヽ(・∀・)ﾉ",
-    "(o･ω･o)",
-    "(^人^)",
-    "( ´ ω ` )",
-    "(´• ω •`)",
-    "╰(▔∀▔)╯",
-    "(✯◡✯)",
-    "(⌒‿⌒)",
-    "(*°▽°*)",
-    "(´｡• ᵕ •｡`)",
-    "ヽ(>∀<☆)ノ",
-    "＼(￣▽￣)／",
-    "(o˘◡˘o)",
-    "(╯✧▽✧)╯",
-    "( ‾́ ◡ ‾́ )",
-    "(๑˘︶˘๑)",
-    "(´･ᴗ･ ` )",
-    "( ͡° ʖ̯ ͡°)",
-    "( ఠ ͟ʖ ఠ)",
-    "( ಥ ʖ̯ ಥ)",
-    "(≖ ͜ʖ≖)",
-    "ヘ(￣ω￣ヘ)",
-    "(ﾉ≧∀≦)ﾉ",
-    "└(￣-￣└))",
-    "┌(＾＾)┘",
-    "(^_^♪)",
-    "(〜￣△￣)〜",
-    "(｢• ω •)｢",
-    "( ˘ ɜ˘) ♬♪♫",
-    "( o˘◡˘o) ┌iii┐",
-    "♨o(>_<)o♨",
-    "( ・・)つ―{}@{}@{}-",
-    "(*´з`)口ﾟ｡ﾟ口(・∀・ )",
-    "( *^^)o∀*∀o(^^* )",
-    "-●●●-ｃ(・・ )",
-    "(ﾉ≧∀≦)ﾉ ‥…━━━★",
-    "╰( ͡° ͜ʖ ͡° )つ──☆*:・ﾟ",
-    "(∩ᄑ_ᄑ)⊃━☆ﾟ*･｡*･:≡( ε:)",
-]
+NEKOS_API = "https://nekos.best/api/v2/{}"
 
 
-def react(update: Update, context: CallbackContext):
+def _send_reaction(update: Update, action: str, verb: str, emoji: str):
     message = update.effective_message
-    react = random.choice(reactions)
+    sender = update.effective_user.first_name
+
+    try:
+        data = requests.get(NEKOS_API.format(action), timeout=10).json()
+        gif_url = data["results"][0]["url"]
+        artist_name = data["results"][0].get("artist_name", "Unknown")
+        anime_name = data["results"][0].get("anime_name", "Unknown")
+    except Exception:
+        message.reply_text("Couldn't fetch a GIF right now. Try again later!")
+        return
+
     if message.reply_to_message:
-        message.reply_to_message.reply_text(react)
+        target = message.reply_to_message.from_user.first_name
+        caption = f"{emoji} *{sender}* {verb} *{target}*!\n_From: {anime_name}_"
     else:
-        message.reply_text(react)
+        caption = f"{emoji} *{sender}* wants to {action} someone!\n_From: {anime_name}_"
+
+    message.reply_animation(
+        animation=gif_url,
+        caption=caption,
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
 
-REACT_HANDLER = DisableAbleCommandHandler("react", react, run_async=True)
+def hug(update: Update, context: CallbackContext):
+    _send_reaction(update, "hug", "hugs", "🤗")
 
-dispatcher.add_handler(REACT_HANDLER)
 
-__command_list__ = ["react"]
-__handlers__ = [REACT_HANDLER]
+def pat(update: Update, context: CallbackContext):
+    _send_reaction(update, "pat", "pats", "👋")
+
+
+def slap(update: Update, context: CallbackContext):
+    _send_reaction(update, "slap", "slaps", "👋")
+
+
+def kiss(update: Update, context: CallbackContext):
+    _send_reaction(update, "kiss", "kisses", "💋")
+
+
+def poke(update: Update, context: CallbackContext):
+    _send_reaction(update, "poke", "pokes", "👉")
+
+
+def wave(update: Update, context: CallbackContext):
+    _send_reaction(update, "wave", "waves at", "👋")
+
+
+def bite(update: Update, context: CallbackContext):
+    _send_reaction(update, "bite", "bites", "😬")
+
+
+def punch(update: Update, context: CallbackContext):
+    _send_reaction(update, "punch", "punches", "👊")
+
+
+def nod(update: Update, context: CallbackContext):
+    _send_reaction(update, "nod", "nods at", "🙂")
+
+
+def shoot(update: Update, context: CallbackContext):
+    _send_reaction(update, "shoot", "shoots", "🔫")
+
+
+def wink(update: Update, context: CallbackContext):
+    _send_reaction(update, "wink", "winks at", "😉")
+
+
+def cry(update: Update, context: CallbackContext):
+    _send_reaction(update, "cry", "is crying", "😢")
+
+
+def laugh(update: Update, context: CallbackContext):
+    _send_reaction(update, "laugh", "is laughing at", "😂")
+
+
+def blush(update: Update, context: CallbackContext):
+    _send_reaction(update, "blush", "blushes at", "😊")
+
+
+__help__ = """
+*Anime Reactions:*
+Send fun anime GIFs to interact with others!
+
+ • `/hug`*:* hug someone
+ • `/pat`*:* pat someone
+ • `/slap`*:* slap someone
+ • `/kiss`*:* kiss someone
+ • `/poke`*:* poke someone
+ • `/wave`*:* wave at someone
+ • `/bite`*:* bite someone
+ • `/punch`*:* punch someone
+ • `/wink`*:* wink at someone
+ • `/cry`*:* cry
+ • `/laugh`*:* laugh
+ • `/blush`*:* blush
+
+_Reply to a user's message to target them!_
+"""
+
+HUG_HANDLER = DisableAbleCommandHandler("hug", hug, run_async=True)
+PAT_HANDLER = DisableAbleCommandHandler("pat", pat, run_async=True)
+SLAP_HANDLER = DisableAbleCommandHandler("slap", slap, run_async=True)
+KISS_HANDLER = DisableAbleCommandHandler("kiss", kiss, run_async=True)
+POKE_HANDLER = DisableAbleCommandHandler("poke", poke, run_async=True)
+WAVE_HANDLER = DisableAbleCommandHandler("wave", wave, run_async=True)
+BITE_HANDLER = DisableAbleCommandHandler("bite", bite, run_async=True)
+PUNCH_HANDLER = DisableAbleCommandHandler("punch", punch, run_async=True)
+NOD_HANDLER = DisableAbleCommandHandler("nod", nod, run_async=True)
+SHOOT_HANDLER = DisableAbleCommandHandler("shoot", shoot, run_async=True)
+WINK_HANDLER = DisableAbleCommandHandler("wink", wink, run_async=True)
+CRY_HANDLER = DisableAbleCommandHandler("cry", cry, run_async=True)
+LAUGH_HANDLER = DisableAbleCommandHandler("laugh", laugh, run_async=True)
+BLUSH_HANDLER = DisableAbleCommandHandler("blush", blush, run_async=True)
+
+dispatcher.add_handler(HUG_HANDLER)
+dispatcher.add_handler(PAT_HANDLER)
+dispatcher.add_handler(SLAP_HANDLER)
+dispatcher.add_handler(KISS_HANDLER)
+dispatcher.add_handler(POKE_HANDLER)
+dispatcher.add_handler(WAVE_HANDLER)
+dispatcher.add_handler(BITE_HANDLER)
+dispatcher.add_handler(PUNCH_HANDLER)
+dispatcher.add_handler(NOD_HANDLER)
+dispatcher.add_handler(SHOOT_HANDLER)
+dispatcher.add_handler(WINK_HANDLER)
+dispatcher.add_handler(CRY_HANDLER)
+dispatcher.add_handler(LAUGH_HANDLER)
+dispatcher.add_handler(BLUSH_HANDLER)
+
+__mod_name__ = "Reactions"
+__command_list__ = [
+    "hug", "pat", "slap", "kiss", "poke",
+    "wave", "bite", "punch", "nod", "shoot",
+    "wink", "cry", "laugh", "blush",
+]
+__handlers__ = [
+    HUG_HANDLER, PAT_HANDLER, SLAP_HANDLER, KISS_HANDLER, POKE_HANDLER,
+    WAVE_HANDLER, BITE_HANDLER, PUNCH_HANDLER, NOD_HANDLER, SHOOT_HANDLER,
+    WINK_HANDLER, CRY_HANDLER, LAUGH_HANDLER, BLUSH_HANDLER,
+]
