@@ -17,8 +17,8 @@ RUN apt-get update -y && \
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip3 install -U pip setuptools wheel && \
-    pip3 install -U -r requirements.txt
+RUN pip3 install -U pip setuptools wheel --root-user-action=ignore && \
+    pip3 install -U -r requirements.txt --root-user-action=ignore
 
 # Copy rest of the project
 COPY . .
@@ -27,4 +27,4 @@ COPY . .
 EXPOSE 8080
 
 # Run the bot
-CMD ["python3", "-m", "BeatManagementRobot"]
+CMD ["python3", "-m", "FallenRobot"]
