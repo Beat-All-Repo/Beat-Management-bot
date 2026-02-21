@@ -14,6 +14,7 @@ gbanned = db.gban
 FUN_LIST = {}
 LOAD_PLUG = {}
 
+
 def register(**args):
     """Registers a new message."""
     pattern = args.get("pattern", None)
