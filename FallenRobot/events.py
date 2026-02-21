@@ -11,7 +11,8 @@ client = MongoClient()
 client = MongoClient(MONGO_DB_URI)
 db = client["Anonymous"]
 gbanned = db.gban
-
+FUN_LIST = {}
+LOAD_PLUG = {}
 
 def register(**args):
     """Registers a new message."""
