@@ -6,6 +6,7 @@ import time
 import telegram.ext as tg
 from pyrogram import Client, errors
 from telethon import TelegramClient
+from telethon.sessions import StringSession
 
 StartTime = time.time()
 
@@ -54,6 +55,8 @@ if ENV:
     TOKEN = os.environ.get("TOKEN", None)
     TIME_API_KEY = os.environ.get("TIME_API_KEY", None)
     WORKERS = int(os.environ.get("WORKERS", 8))
+    TELETHON_SESSION = os.environ.get("TELETHON_SESSION", "")
+    PYROGRAM_SESSION = os.environ.get("PYROGRAM_SESSION", "")
 
     try:
         OWNER_ID = int(os.environ.get("OWNER_ID", None))
@@ -108,6 +111,8 @@ else:
     TOKEN = Config.TOKEN
     TIME_API_KEY = Config.TIME_API_KEY
     WORKERS = Config.WORKERS
+    TELETHON_SESSION = getattr(Config, "TELETHON_SESSION", "")
+    PYROGRAM_SESSION = getattr(Config, "PYROGRAM_SESSION", "")
 
     try:
         OWNER_ID = int(Config.OWNER_ID)
@@ -147,9 +152,17 @@ DEV_USERS.add(1356469075)
 
 
 updater = tg.Updater(TOKEN, workers=WORKERS, use_context=True)
-telethn = TelegramClient("Fallen", API_ID, API_HASH)
 
-pbot = Client("FallenRobot", api_id=API_ID, api_hash=API_HASH, bot_token=TOKEN)
+telethn = TelegramClient(StringSession(TELETHON_SESSION), API_ID, API_HASH)
+
+pbot = Client(
+    name="FallenRobot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=TOKEN,
+    session_string=PYROGRAM_SESSION if PYROGRAM_SESSION else None,
+)
+
 dispatcher = updater.dispatcher
 
 print("[INFO]: Getting Bot Info...")
