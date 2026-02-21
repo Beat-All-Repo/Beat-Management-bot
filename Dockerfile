@@ -16,11 +16,12 @@ RUN apt-get update -y && \
 # Copy requirements first (better Docker layer caching)
 COPY requirements.txt .
 
-# Install setuptools first to ensure pkg_resources is always available,
-# then install remaining dependencies
+# Install setuptools first, then all requirements,
+# then force-reinstall setuptools so nothing can remove it
 RUN pip3 install --root-user-action=ignore -U pip && \
     pip3 install --root-user-action=ignore -U setuptools wheel && \
-    pip3 install --root-user-action=ignore -U -r requirements.txt
+    pip3 install --root-user-action=ignore -U -r requirements.txt && \
+    pip3 install --root-user-action=ignore --force-reinstall "setuptools>=65.0.0"
 
 # Copy rest of the project
 COPY . .
