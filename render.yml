@@ -1,0 +1,130 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# render.yml  —  FallenRobot deployment on Render free tier
+#
+# Render's free tier only supports "web" services (not background workers).
+# The bot includes a tiny keep-alive HTTP server so Render keeps it running.
+#
+# Deploy steps:
+#   1. Push this repo to GitHub / GitLab.
+#   2. Go to https://dashboard.render.com → New → Web Service.
+#   3. Connect your repo and Render will detect this file automatically.
+#   4. Fill in the required environment variables marked ⚠ below.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  - type: web                      # Free tier supports "web" only
+    name: fallen-robot
+    runtime: python
+    region: oregon                 # Change to: frankfurt | singapore | ohio
+    plan: free
+
+    # ── Build ────────────────────────────────────────────────────────────────
+    buildCommand: pip install -r requirements.txt
+
+    # ── Start ────────────────────────────────────────────────────────────────
+    # main.py must start the keep-alive HTTP server (see keepalive.py below)
+    startCommand: python main.py
+
+    # ── Health check (keeps free-tier service alive) ──────────────────────────
+    healthCheckPath: /health
+
+    # ── Environment variables ────────────────────────────────────────────────
+    envVars:
+
+      # ── Required ────────────────────────────────────────────────────────────
+
+      - key: TOKEN                   # ⚠ Your bot token from @BotFather
+        sync: false
+
+      - key: API_ID                  # ⚠ From https://my.telegram.org/apps
+        sync: false
+
+      - key: API_HASH                # ⚠ From https://my.telegram.org/apps
+        sync: false
+
+      - key: OWNER_ID                # ⚠ Your Telegram numeric user ID
+        sync: false
+
+      # ── Database (at least one required) ─────────────────────────────────
+
+      - key: DATABASE_URL            # ⚠ PostgreSQL URL (ElephantSQL / Supabase)
+        sync: false                  #   e.g. postgresql://user:pass@host/db
+
+      - key: MONGO_DB_URI            # ⚠ MongoDB Atlas URI
+        sync: false                  #   e.g. mongodb+srv://user:pass@cluster/db
+
+      # ── Support / Community ───────────────────────────────────────────────
+
+      - key: SUPPORT_CHAT
+        value: DevilsHeavenMF        # Your support group username (no @)
+
+      - key: EVENT_LOGS              # Channel ID for event logs (optional)
+        sync: false
+
+      # ── Optional API keys ────────────────────────────────────────────────
+
+      - key: CASH_API_KEY            # alphavantage.co — currency converter
+        sync: false
+
+      - key: TIME_API_KEY            # timezonedb.com — timezone lookups
+        sync: false
+
+      - key: WALL_API_KEY            # alphacoders.com — wallpaper search
+        sync: false
+
+      # ── Bot appearance ───────────────────────────────────────────────────
+
+      - key: START_PICS              # Comma-separated image URLs for /start
+        sync: false
+
+      - key: HELP_PICS               # Comma-separated image URLs for /help
+        sync: false
+
+      - key: ANIME_CHANNEL           # Your anime channel link
+        sync: false
+
+      - key: CONTACT_ADMIN           # Admin contact link
+        sync: false
+
+      # ── Privileged user lists (comma-separated IDs) ───────────────────────
+
+      - key: DRAGONS                 # Sudo user IDs
+        sync: false
+
+      - key: DEV_USERS               # Dev user IDs
+        sync: false
+
+      - key: DEMONS                  # Support user IDs
+        sync: false
+
+      - key: TIGERS
+        sync: false
+
+      - key: WOLVES                  # Whitelist user IDs
+        sync: false
+
+      # ── Behaviour flags ──────────────────────────────────────────────────
+
+      - key: ALLOW_CHATS
+        value: "True"
+
+      - key: ALLOW_EXCL
+        value: "True"
+
+      - key: DEL_CMDS
+        value: "True"
+
+      - key: STRICT_GBAN
+        value: "True"
+
+      - key: WORKERS
+        value: "4"                   # Keep low on free tier (512 MB RAM)
+
+      - key: TEMP_DOWNLOAD_DIRECTORY
+        value: "./"
+
+      # ── Keep-alive / web server ──────────────────────────────────────────
+      # Render injects PORT automatically; no need to set it manually.
+
+      - key: WEBHOOK_URL             # Optional: your Render service URL
+        sync: false                  # e.g. https://fallen-robot.onrender.com
