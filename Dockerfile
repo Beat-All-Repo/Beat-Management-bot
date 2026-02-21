@@ -16,9 +16,11 @@ RUN apt-get update -y && \
 # Copy requirements first (better Docker layer caching)
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip3 install -U pip setuptools wheel --root-user-action=ignore && \
-    pip3 install -U -r requirements.txt --root-user-action=ignore
+# Install setuptools first to ensure pkg_resources is always available,
+# then install remaining dependencies
+RUN pip3 install --root-user-action=ignore -U pip && \
+    pip3 install --root-user-action=ignore -U setuptools wheel && \
+    pip3 install --root-user-action=ignore -U -r requirements.txt
 
 # Copy rest of the project
 COPY . .
