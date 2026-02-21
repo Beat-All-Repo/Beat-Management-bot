@@ -15,23 +15,25 @@ ADMIN COMMANDS:
   /requests              — view all pending requests
   /fulfill <id>          — mark a request as fulfilled
   /delrequest <id>       — delete a request
+
+STORAGE BACKEND:
+  • If DATABASE_URL is set  → uses PostgreSQL via SQLAlchemy (primary)
+  • If only MONGO_DB_URI is set → uses MongoDB via Motor (fallback)
 """
 
 import threading
 import time
 
 import requests as http
-from sqlalchemy import BigInteger, Boolean, Column, String, UnicodeText
 from telegram import Update, ParseMode
 from telegram.ext import CallbackContext
 
-from FallenRobot import dispatcher, DRAGONS
+from FallenRobot import dispatcher, DRAGONS, DB_URI, MONGO_DB_URI
 from FallenRobot.modules.disable import DisableAbleCommandHandler
-from FallenRobot.modules.sql import BASE, SESSION
 
 # ── Tunable constants ──────────────────────────────────────────────────────────
-COOLDOWN_SECONDS = 300       # seconds a user must wait between requests
-MAX_PENDING_PER_USER = 5     # max unresolved requests a user may have at once
+COOLDOWN_SECONDS = 300
+MAX_PENDING_PER_USER = 5
 
 ANILIST_API = "https://graphql.anilist.co"
 ANILIST_QUERY = """
@@ -51,48 +53,85 @@ query ($search: String) {
 _cooldowns: dict = {}
 _cd_lock = threading.Lock()
 
+# ── Pick storage backend ───────────────────────────────────────────────────────
+_USE_MONGO = False
 
-# ── SQL model ──────────────────────────────────────────────────────────────────
+if DB_URI:
+    # ── SQL backend ───────────────────────────────────────────────────────────
+    import threading as _threading
+    from sqlalchemy import BigInteger, Boolean, Column, String, UnicodeText
+    from FallenRobot.modules.sql import BASE, SESSION
 
-class AnimeRequest(BASE):
-    __tablename__ = "anime_requests"
+    class AnimeRequest(BASE):
+        __tablename__ = "anime_requests"
 
-    id             = Column(BigInteger, primary_key=True, autoincrement=True)
-    user_id        = Column(BigInteger,  nullable=False, index=True)
-    chat_id        = Column(String(14),  nullable=False, index=True)
-    raw_query      = Column(UnicodeText, nullable=False)          # exactly what user typed
-    validated_title = Column(UnicodeText, nullable=False)         # canonical title from AniList
-    anilist_id     = Column(BigInteger,  nullable=True)           # AniList media ID
-    anilist_url    = Column(UnicodeText, nullable=True)
-    fulfilled      = Column(Boolean,     default=False)
-    created_at     = Column(BigInteger,  nullable=False)
+        id              = Column(BigInteger, primary_key=True, autoincrement=True)
+        user_id         = Column(BigInteger,  nullable=False, index=True)
+        chat_id         = Column(String(14),  nullable=False, index=True)
+        raw_query       = Column(UnicodeText, nullable=False)
+        validated_title = Column(UnicodeText, nullable=False)
+        anilist_id      = Column(BigInteger,  nullable=True)
+        anilist_url     = Column(UnicodeText, nullable=True)
+        fulfilled       = Column(Boolean,     default=False)
+        created_at      = Column(BigInteger,  nullable=False)
 
-    def __init__(self, user_id, chat_id, raw_query, validated_title,
-                 anilist_id=None, anilist_url=""):
-        self.user_id         = user_id
-        self.chat_id         = str(chat_id)
-        self.raw_query       = raw_query
-        self.validated_title = validated_title
-        self.anilist_id      = anilist_id
-        self.anilist_url     = anilist_url
-        self.fulfilled       = False
-        self.created_at      = int(time.time())
+        def __init__(self, user_id, chat_id, raw_query, validated_title,
+                     anilist_id=None, anilist_url=""):
+            self.user_id         = user_id
+            self.chat_id         = str(chat_id)
+            self.raw_query       = raw_query
+            self.validated_title = validated_title
+            self.anilist_id      = anilist_id
+            self.anilist_url     = anilist_url
+            self.fulfilled       = False
+            self.created_at      = int(time.time())
 
-    def __repr__(self):
-        return f"<AnimeRequest #{self.id} — {self.validated_title}>"
+        def __repr__(self):
+            return f"<AnimeRequest #{self.id} — {self.validated_title}>"
 
+    AnimeRequest.__table__.create(checkfirst=True)
+    DB_LOCK = _threading.RLock()
 
-AnimeRequest.__table__.create(checkfirst=True)
-DB_LOCK = threading.RLock()
+elif MONGO_DB_URI:
+    # ── MongoDB backend ───────────────────────────────────────────────────────
+    _USE_MONGO = True
+    from FallenRobot.utils.mongo import db as _mongo_db
+    _req_col = _mongo_db.anime_requests          # Motor collection
+    _counter_col = _mongo_db.anime_req_counters  # auto-increment emulation
+
+    import asyncio as _asyncio
+
+    def _run(coro):
+        """Run an async Motor coroutine synchronously from a sync context."""
+        try:
+            loop = _asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(_asyncio.run, coro)
+                    return future.result()
+            return loop.run_until_complete(coro)
+        except RuntimeError:
+            return _asyncio.run(coro)
+
+    async def _next_id():
+        result = await _counter_col.find_one_and_update(
+            {"_id": "anime_requests"},
+            {"$inc": {"seq": 1}},
+            upsert=True,
+            return_document=True,
+        )
+        return result["seq"]
+
+else:
+    raise SystemExit(
+        "animerequest: Neither DATABASE_URL nor MONGO_DB_URI is configured."
+    )
 
 
 # ── AniList validation ─────────────────────────────────────────────────────────
 
 def validate_on_anilist(query: str) -> dict | None:
-    """
-    Hit AniList GraphQL and return media info if found, else None.
-    A None return means the title is NOT a real/known anime — request rejected.
-    """
     try:
         resp = http.post(
             ANILIST_API,
@@ -100,10 +139,8 @@ def validate_on_anilist(query: str) -> dict | None:
             timeout=8,
         )
         data = resp.json()
-
         if "errors" in data or not data.get("data", {}).get("Media"):
             return None
-
         media = data["data"]["Media"]
         titles = media["title"]
         return {
@@ -120,10 +157,9 @@ def validate_on_anilist(query: str) -> dict | None:
         return None
 
 
-# ── DB helpers ─────────────────────────────────────────────────────────────────
+# ── DB helpers — SQL ───────────────────────────────────────────────────────────
 
-def _insert_request(user_id, chat_id, raw_query,
-                    validated_title, anilist_id, anilist_url) -> int:
+def _sql_insert(user_id, chat_id, raw_query, validated_title, anilist_id, anilist_url):
     with DB_LOCK:
         row = AnimeRequest(user_id, str(chat_id), raw_query,
                            validated_title, anilist_id, anilist_url)
@@ -132,7 +168,7 @@ def _insert_request(user_id, chat_id, raw_query,
         return row.id
 
 
-def _pending_count_for_user(user_id: int, chat_id) -> int:
+def _sql_pending_count(user_id, chat_id):
     try:
         return (SESSION.query(AnimeRequest)
                 .filter_by(user_id=user_id, chat_id=str(chat_id), fulfilled=False)
@@ -141,19 +177,16 @@ def _pending_count_for_user(user_id: int, chat_id) -> int:
         SESSION.close()
 
 
-def _duplicate_exists(chat_id, anilist_id: int) -> bool:
-    """True if this AniList title is already pending in this chat."""
+def _sql_duplicate(chat_id, anilist_id):
     try:
         return (SESSION.query(AnimeRequest)
-                .filter_by(chat_id=str(chat_id),
-                           anilist_id=anilist_id,
-                           fulfilled=False)
+                .filter_by(chat_id=str(chat_id), anilist_id=anilist_id, fulfilled=False)
                 .count()) > 0
     finally:
         SESSION.close()
 
 
-def _get_pending(chat_id) -> list:
+def _sql_get_pending(chat_id):
     try:
         return (SESSION.query(AnimeRequest)
                 .filter_by(chat_id=str(chat_id), fulfilled=False)
@@ -162,7 +195,7 @@ def _get_pending(chat_id) -> list:
         SESSION.close()
 
 
-def _fulfill(req_id: int) -> bool:
+def _sql_fulfill(req_id):
     with DB_LOCK:
         row = SESSION.query(AnimeRequest).get(req_id)
         if row:
@@ -173,7 +206,7 @@ def _fulfill(req_id: int) -> bool:
         return False
 
 
-def _delete(req_id: int) -> bool:
+def _sql_delete(req_id):
     with DB_LOCK:
         row = SESSION.query(AnimeRequest).get(req_id)
         if row:
@@ -184,18 +217,148 @@ def _delete(req_id: int) -> bool:
         return False
 
 
+def _sql_user_requests(user_id, chat_id):
+    try:
+        return (SESSION.query(AnimeRequest)
+                .filter_by(user_id=user_id, chat_id=str(chat_id))
+                .order_by(AnimeRequest.fulfilled.asc(), AnimeRequest.id.desc())
+                .limit(10).all())
+    finally:
+        SESSION.close()
+
+
+# ── DB helpers — MongoDB ───────────────────────────────────────────────────────
+
+async def _mongo_insert(user_id, chat_id, raw_query, validated_title, anilist_id, anilist_url):
+    req_id = await _next_id()
+    doc = {
+        "_id":            req_id,
+        "user_id":        user_id,
+        "chat_id":        str(chat_id),
+        "raw_query":      raw_query,
+        "validated_title": validated_title,
+        "anilist_id":     anilist_id,
+        "anilist_url":    anilist_url,
+        "fulfilled":      False,
+        "created_at":     int(time.time()),
+    }
+    await _req_col.insert_one(doc)
+    return req_id
+
+
+async def _mongo_pending_count(user_id, chat_id):
+    return await _req_col.count_documents(
+        {"user_id": user_id, "chat_id": str(chat_id), "fulfilled": False}
+    )
+
+
+async def _mongo_duplicate(chat_id, anilist_id):
+    return bool(await _req_col.find_one(
+        {"chat_id": str(chat_id), "anilist_id": anilist_id, "fulfilled": False}
+    ))
+
+
+async def _mongo_get_pending(chat_id):
+    cursor = _req_col.find(
+        {"chat_id": str(chat_id), "fulfilled": False}
+    ).sort("_id", 1)
+    return await cursor.to_list(length=50)
+
+
+async def _mongo_fulfill(req_id):
+    result = await _req_col.update_one({"_id": req_id}, {"$set": {"fulfilled": True}})
+    return result.modified_count > 0
+
+
+async def _mongo_delete(req_id):
+    result = await _req_col.delete_one({"_id": req_id})
+    return result.deleted_count > 0
+
+
+async def _mongo_user_requests(user_id, chat_id):
+    cursor = _req_col.find(
+        {"user_id": user_id, "chat_id": str(chat_id)}
+    ).sort([("fulfilled", 1), ("_id", -1)]).limit(10)
+    return await cursor.to_list(length=10)
+
+
+# ── Unified DB helpers (dispatch to correct backend) ──────────────────────────
+
+def _insert_request(user_id, chat_id, raw_query, validated_title, anilist_id, anilist_url):
+    if _USE_MONGO:
+        return _run(_mongo_insert(user_id, chat_id, raw_query, validated_title, anilist_id, anilist_url))
+    return _sql_insert(user_id, chat_id, raw_query, validated_title, anilist_id, anilist_url)
+
+
+def _pending_count_for_user(user_id, chat_id):
+    if _USE_MONGO:
+        return _run(_mongo_pending_count(user_id, chat_id))
+    return _sql_pending_count(user_id, chat_id)
+
+
+def _duplicate_exists(chat_id, anilist_id):
+    if _USE_MONGO:
+        return _run(_mongo_duplicate(chat_id, anilist_id))
+    return _sql_duplicate(chat_id, anilist_id)
+
+
+def _get_pending(chat_id):
+    if _USE_MONGO:
+        return _run(_mongo_get_pending(chat_id))
+    return _sql_get_pending(chat_id)
+
+
+def _fulfill(req_id):
+    if _USE_MONGO:
+        return _run(_mongo_fulfill(req_id))
+    return _sql_fulfill(req_id)
+
+
+def _delete(req_id):
+    if _USE_MONGO:
+        return _run(_mongo_delete(req_id))
+    return _sql_delete(req_id)
+
+
+def _user_requests(user_id, chat_id):
+    if _USE_MONGO:
+        return _run(_mongo_user_requests(user_id, chat_id))
+    return _sql_user_requests(user_id, chat_id)
+
+
 # ── Cooldown helpers ───────────────────────────────────────────────────────────
 
 def _cooldown_remaining(user_id: int) -> int:
     with _cd_lock:
         elapsed = time.time() - _cooldowns.get(user_id, 0)
-        remaining = COOLDOWN_SECONDS - elapsed
-        return max(0, int(remaining))
+        return max(0, int(COOLDOWN_SECONDS - elapsed))
 
 
 def _stamp_cooldown(user_id: int):
     with _cd_lock:
         _cooldowns[user_id] = time.time()
+
+
+# ── Helper: get title/url from a row (works for both SQL ORM obj and Mongo dict) ─
+
+def _title(row):
+    return row.validated_title if hasattr(row, "validated_title") else row["validated_title"]
+
+
+def _url(row):
+    return row.anilist_url if hasattr(row, "anilist_url") else row.get("anilist_url", "")
+
+
+def _rid(row):
+    return row.id if hasattr(row, "id") else row["_id"]
+
+
+def _fulfilled(row):
+    return row.fulfilled if hasattr(row, "fulfilled") else row["fulfilled"]
+
+
+def _uid(row):
+    return row.user_id if hasattr(row, "user_id") else row["user_id"]
 
 
 # ── /request ───────────────────────────────────────────────────────────────────
@@ -213,7 +376,6 @@ def request_cmd(update: Update, context: CallbackContext):
             parse_mode=ParseMode.MARKDOWN,
         )
 
-    # ── layer 1: cooldown ──────────────────────────────────────────────────────
     wait = _cooldown_remaining(user.id)
     if wait:
         m, s = divmod(wait, 60)
@@ -222,7 +384,6 @@ def request_cmd(update: Update, context: CallbackContext):
             parse_mode=ParseMode.MARKDOWN,
         )
 
-    # ── layer 2: pending cap ───────────────────────────────────────────────────
     pending = _pending_count_for_user(user.id, chat.id)
     if pending >= MAX_PENDING_PER_USER:
         return message.reply_text(
@@ -232,43 +393,35 @@ def request_cmd(update: Update, context: CallbackContext):
         )
 
     query = " ".join(args).strip()
-
-    # ── layer 3: AniList validation ────────────────────────────────────────────
     wait_msg = message.reply_text(
         f"🔍 Checking *{query}* on AniList...",
         parse_mode=ParseMode.MARKDOWN,
     )
 
     anime = validate_on_anilist(query)
-
     if not anime:
         wait_msg.edit_text(
             f"❌ *\"{query}\"* is not recognised as a valid anime.\n\n"
-            "Only real anime titles (verified via AniList) are accepted "
-            "to keep the request list spam-free.\n\n"
+            "Only real anime titles (verified via AniList) are accepted.\n\n"
             "_Tip:_ find the exact title on [AniList](https://anilist.co) first.",
             parse_mode=ParseMode.MARKDOWN,
             disable_web_page_preview=True,
         )
         return
 
-    # ── layer 4: duplicate detection ──────────────────────────────────────────
     if _duplicate_exists(chat.id, anime["id"]):
         wait_msg.edit_text(
-            f"⚠️ *{anime['english'] or anime['romaji']}* is already in the pending request list!\n"
-            "No need to request it again.",
+            f"⚠️ *{anime['english'] or anime['romaji']}* is already in the pending list!",
             parse_mode=ParseMode.MARKDOWN,
         )
         return
 
-    # ── all checks passed — save ───────────────────────────────────────────────
     canonical = anime["english"] or anime["romaji"]
     req_id = _insert_request(
         user.id, chat.id, query,
         canonical, anime["id"], anime["url"]
     )
     _stamp_cooldown(user.id)
-
     wait_msg.delete()
 
     message.reply_text(
@@ -292,23 +445,14 @@ def myrequests_cmd(update: Update, context: CallbackContext):
     user    = update.effective_user
     chat    = update.effective_chat
 
-    try:
-        rows = (SESSION.query(AnimeRequest)
-                .filter_by(user_id=user.id, chat_id=str(chat.id))
-                .order_by(AnimeRequest.fulfilled.asc(), AnimeRequest.id.desc())
-                .limit(10).all())
-    finally:
-        SESSION.close()
-
+    rows = _user_requests(user.id, chat.id)
     if not rows:
         return message.reply_text("You have no requests in this chat yet.")
 
     lines = ["📋 *Your Requests:*\n"]
     for r in rows:
-        icon = "✅" if r.fulfilled else "⏳"
-        lines.append(
-            f"{icon} `#{r.id}` — [{r.validated_title}]({r.anilist_url})"
-        )
+        icon = "✅" if _fulfilled(r) else "⏳"
+        lines.append(f"{icon} `#{_rid(r)}` — [{_title(r)}]({_url(r)})")
 
     message.reply_text(
         "\n".join(lines),
@@ -335,8 +479,8 @@ def requests_list_cmd(update: Update, context: CallbackContext):
     lines = [f"📋 *Pending Requests — {chat.title}:*\n"]
     for r in pending:
         lines.append(
-            f"• `#{r.id}` — [{r.validated_title}]({r.anilist_url})\n"
-            f"   _user_ `{r.user_id}`"
+            f"• `#{_rid(r)}` — [{_title(r)}]({_url(r)})\n"
+            f"   _user_ `{_uid(r)}`"
         )
     lines.append("\n`/fulfill <id>` · `/delrequest <id>`")
 
@@ -360,21 +504,13 @@ def fulfill_cmd(update: Update, context: CallbackContext):
         return message.reply_text("» Only admins can fulfill requests!")
 
     if not args or not args[0].isdigit():
-        return message.reply_text(
-            "Usage: `/fulfill <request id>`", parse_mode=ParseMode.MARKDOWN
-        )
+        return message.reply_text("Usage: `/fulfill <request id>`", parse_mode=ParseMode.MARKDOWN)
 
     req_id = int(args[0])
     if _fulfill(req_id):
-        message.reply_text(
-            f"✅ Request `#{req_id}` marked as *fulfilled*!",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        message.reply_text(f"✅ Request `#{req_id}` marked as *fulfilled*!", parse_mode=ParseMode.MARKDOWN)
     else:
-        message.reply_text(
-            f"❌ Request `#{req_id}` not found.",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        message.reply_text(f"❌ Request `#{req_id}` not found.", parse_mode=ParseMode.MARKDOWN)
 
 
 # ── /delrequest (admin) ────────────────────────────────────────────────────────
@@ -390,21 +526,13 @@ def delrequest_cmd(update: Update, context: CallbackContext):
         return message.reply_text("» Only admins can delete requests!")
 
     if not args or not args[0].isdigit():
-        return message.reply_text(
-            "Usage: `/delrequest <request id>`", parse_mode=ParseMode.MARKDOWN
-        )
+        return message.reply_text("Usage: `/delrequest <request id>`", parse_mode=ParseMode.MARKDOWN)
 
     req_id = int(args[0])
     if _delete(req_id):
-        message.reply_text(
-            f"🗑️ Request `#{req_id}` deleted.",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        message.reply_text(f"🗑️ Request `#{req_id}` deleted.", parse_mode=ParseMode.MARKDOWN)
     else:
-        message.reply_text(
-            f"❌ Request `#{req_id}` not found.",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        message.reply_text(f"❌ Request `#{req_id}` not found.", parse_mode=ParseMode.MARKDOWN)
 
 
 # ── Register handlers ──────────────────────────────────────────────────────────
@@ -438,4 +566,6 @@ __help__ = """
  ✦ 5-minute cooldown between requests per user
  ✦ Max 5 pending requests per user at a time
  ✦ Duplicate titles (same chat) are rejected automatically
+
+*Storage:* PostgreSQL (primary) or MongoDB (fallback)
 """
