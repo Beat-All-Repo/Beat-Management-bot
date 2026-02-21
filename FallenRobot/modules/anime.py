@@ -8,8 +8,8 @@ import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, Update
 from telegram.ext import CallbackContext, CallbackQueryHandler
 
-from NekoRobot import DEV_USERS, DRAGONS, NEKO_PTB, OWNER_ID
-from NekoRobot.modules.disable import DisableAbleCommandHandler
+from FallenRobot import DEV_USERS, DRAGONS, dispatcher, OWNER_ID
+from FallenRobot.modules.disable import DisableAbleCommandHandler
 
 info_btn = "More Information"
 kaizoku_btn = "Kaizoku ☠️"
@@ -25,14 +25,11 @@ def shorten(description, info="anilist.co"):
         description = description[:500] + "...."
         msg += f"\n*Description*: _{description}_[Read More]({info})"
     else:
-        msg += f"\n*Description*:_{description}_"
+        msg += f"\n*Description*: _{description}_"
     return msg
 
 
-# time formatter from uniborg
 def t(milliseconds: int) -> str:
-    """Inputs time in milliseconds, to get beautified time,
-    as string"""
     seconds, milliseconds = divmod(milliseconds, 1000)
     minutes, seconds = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
@@ -44,7 +41,6 @@ def t(milliseconds: int) -> str:
         + (f"{str(seconds)} Seconds, " if seconds else "")
         + (f"{str(milliseconds)} ms, " if milliseconds else "")
     )
-
     return tmp[:-2]
 
 
@@ -66,19 +62,6 @@ airing_query = """
       }
     }
     """
-
-fav_query = """
-query ($id: Int) { 
-      Media (id: $id, type: ANIME) { 
-        id
-        title {
-          romaji
-          english
-          native
-        }
-     }
-}
-"""
 
 anime_query = """
    query ($id: Int,$search: String) { 
@@ -116,6 +99,7 @@ anime_query = """
       }
     }
 """
+
 character_query = """
     query ($query: String) {
         Character (search: $query) {
@@ -179,7 +163,7 @@ def airing(update: Update, context: CallbackContext):
         time = t(time)
         msg += f"\n*Episode*: `{response['nextAiringEpisode']['episode']}`\n*Airing In*: `{time}`"
     else:
-        msg += f"\n*Episode*:{response['episodes']}\n*Status*: `N/A`"
+        msg += f"\n*Episode*: {response['episodes']}\n*Status*: `N/A`"
     update.effective_message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
 
@@ -187,7 +171,7 @@ def anime(update: Update, context: CallbackContext):
     message = update.effective_message
     search = message.text.split(" ", 1)
     if len(search) == 1:
-        update.effective_message.reply_text("Format : /anime < anime name >")
+        update.effective_message.reply_text("Format : /anime <anime name>")
         return
     else:
         search = search[1]
@@ -210,7 +194,6 @@ def anime(update: Update, context: CallbackContext):
         msg = msg[:-2] + "`\n"
         info = json.get("siteUrl")
         trailer = json.get("trailer", None)
-        json["id"]
         if trailer:
             trailer_id = trailer.get("id", None)
             site = trailer.get("site", None)
@@ -241,7 +224,7 @@ def anime(update: Update, context: CallbackContext):
                     parse_mode=ParseMode.MARKDOWN,
                     reply_markup=InlineKeyboardMarkup(buttons),
                 )
-            except:
+            except Exception:
                 msg += f" [〽️]({image})"
                 update.effective_message.reply_text(
                     msg,
@@ -260,7 +243,7 @@ def character(update: Update, context: CallbackContext):
     message = update.effective_message
     search = message.text.split(" ", 1)
     if len(search) == 1:
-        update.effective_message.reply_text("Format : /character < character name >")
+        update.effective_message.reply_text("Format : /character <character name>")
         return
     search = search[1]
     variables = {"query": search}
@@ -293,7 +276,7 @@ def manga(update: Update, context: CallbackContext):
     message = update.effective_message
     search = message.text.split(" ", 1)
     if len(search) == 1:
-        update.effective_message.reply_text("Format : /manga < manga name >")
+        update.effective_message.reply_text("Format : /manga <manga name>")
         return
     search = search[1]
     variables = {"search": search}
@@ -331,7 +314,14 @@ def manga(update: Update, context: CallbackContext):
         info = json["siteUrl"]
         buttons = [[InlineKeyboardButton("More Info", url=info)]]
         image = json.get("bannerImage", False)
-        msg += f"_{json.get('description', None)}_"
+        description = json.get("description", "")
+        if description:
+            description = (
+                description.replace("<i>", "")
+                .replace("</i>", "")
+                .replace("<br>", "")
+            )
+            msg += shorten(description, info)
         if image:
             try:
                 update.effective_message.reply_photo(
@@ -340,7 +330,7 @@ def manga(update: Update, context: CallbackContext):
                     parse_mode=ParseMode.MARKDOWN,
                     reply_markup=InlineKeyboardMarkup(buttons),
                 )
-            except:
+            except Exception:
                 msg += f" [〽️]({image})"
                 update.effective_message.reply_text(
                     msg,
@@ -361,7 +351,7 @@ def user(update: Update, context: CallbackContext):
 
     try:
         search_query = args[1]
-    except:
+    except IndexError:
         if message.reply_to_message:
             search_query = message.reply_to_message.text
         else:
@@ -371,7 +361,7 @@ def user(update: Update, context: CallbackContext):
     jikan = jikanpy.jikan.Jikan()
 
     try:
-        user = jikan.user(search_query)
+        mal_user = jikan.user(search_query)
     except jikanpy.APIException:
         update.effective_message.reply_text("Username not found.")
         return
@@ -379,26 +369,25 @@ def user(update: Update, context: CallbackContext):
     progress_message = update.effective_message.reply_text("Searching.... ")
 
     date_format = "%Y-%m-%d"
-    if user["image_url"] is None:
+    if mal_user["image_url"] is None:
         img = "https://cdn.myanimelist.net/images/questionmark_50.gif"
     else:
-        img = user["image_url"]
+        img = mal_user["image_url"]
 
     try:
-        user_birthday = datetime.datetime.fromisoformat(user["birthday"])
+        user_birthday = datetime.datetime.fromisoformat(mal_user["birthday"])
         user_birthday_formatted = user_birthday.strftime(date_format)
-    except:
+    except Exception:
         user_birthday_formatted = "Unknown"
 
-    user_joined_date = datetime.datetime.fromisoformat(user["joined"])
+    user_joined_date = datetime.datetime.fromisoformat(mal_user["joined"])
     user_joined_date_formatted = user_joined_date.strftime(date_format)
 
-    for entity in user:
-        if user[entity] is None:
-            user[entity] = "Unknown"
+    for entity in mal_user:
+        if mal_user[entity] is None:
+            mal_user[entity] = "Unknown"
 
-    about = user["about"].split(" ", 60)
-
+    about = mal_user["about"].split(" ", 60)
     try:
         about.pop(60)
     except IndexError:
@@ -407,25 +396,22 @@ def user(update: Update, context: CallbackContext):
     about_string = " ".join(about)
     about_string = about_string.replace("<br>", "").strip().replace("\r\n", "\n")
 
-    caption = ""
-
-    caption += textwrap.dedent(
+    caption = textwrap.dedent(
         f"""
-    *Username*: [{user['username']}]({user['url']})
+*Username*: [{mal_user['username']}]({mal_user['url']})
 
-    *Gender*: `{user['gender']}`
-    *Birthday*: `{user_birthday_formatted}`
-    *Joined*: `{user_joined_date_formatted}`
-    *Days wasted watching anime*: `{user['anime_stats']['days_watched']}`
-    *Days wasted reading manga*: `{user['manga_stats']['days_read']}`
+*Gender*: `{mal_user['gender']}`
+*Birthday*: `{user_birthday_formatted}`
+*Joined*: `{user_joined_date_formatted}`
+*Days wasted watching anime*: `{mal_user['anime_stats']['days_watched']}`
+*Days wasted reading manga*: `{mal_user['manga_stats']['days_read']}`
 
-    """
+"""
     )
-
     caption += f"*About*: {about_string}"
 
     buttons = [
-        [InlineKeyboardButton(info_btn, url=user["url"])],
+        [InlineKeyboardButton(info_btn, url=mal_user["url"])],
         [
             InlineKeyboardButton(
                 close_btn, callback_data=f"anime_close, {message.from_user.id}"
@@ -445,9 +431,9 @@ def user(update: Update, context: CallbackContext):
 
 def upcoming(update: Update, context: CallbackContext):
     jikan = jikanpy.jikan.Jikan()
-    upcoming = jikan.top("anime", page=1, subtype="upcoming")
+    upcoming_data = jikan.top("anime", page=1, subtype="upcoming")
 
-    upcoming_list = [entry["title"] for entry in upcoming["top"]]
+    upcoming_list = [entry["title"] for entry in upcoming_data["top"]]
     upcoming_message = ""
 
     for entry_num in range(len(upcoming_list)):
@@ -466,7 +452,7 @@ def button(update: Update, context: CallbackContext):
     query_type = data[0]
     original_user_id = int(data[1])
 
-    user_and_admin_list = [original_user_id, OWNER_ID] + DRAGONS + DEV_USERS
+    user_and_admin_list = [original_user_id, OWNER_ID] + list(DRAGONS) + list(DEV_USERS)
 
     bot.answer_callback_query(query.id)
     if query_type == "anime_close" and query.from_user.id in user_and_admin_list:
@@ -477,20 +463,6 @@ def button(update: Update, context: CallbackContext):
         and query.from_user.id != original_user_id
     ):
         query.answer("You are not allowed to use this.")
-    elif query_type in ("anime_anime", "anime_manga"):
-        message.delete()
-        progress_message = bot.sendMessage(message.chat.id, "Searching.... ")
-        mal_id = data[2]
-        caption, buttons, image = get_anime_manga(mal_id, query_type, original_user_id)
-        bot.sendPhoto(
-            message.chat.id,
-            photo=image,
-            caption=caption,
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup(buttons),
-            disable_web_page_preview=False,
-        )
-        progress_message.delete()
 
 
 def site_search(update: Update, context: CallbackContext, site: str):
@@ -534,6 +506,8 @@ def site_search(update: Update, context: CallbackContext, site: str):
             post_link = entry.a["href"]
             post_name = html.escape(entry.text.strip())
             result += f"• <a href='{post_link}'>{post_name}</a>\n"
+    else:
+        return
 
     buttons = [[InlineKeyboardButton("See all results", url=search_url)]]
 
@@ -571,12 +545,7 @@ Get information about anime, manga or characters from [AniList](anilist.co).
  • `/kaizoku <anime>`*:* search an anime on animekaizoku.com
  • `/kayo <anime>`*:* search an anime on animekayo.com
  • `/airing <anime>`*:* returns anime airing info.
- • `/imdb` <anime/movie name> *:* get IMDb details of the anime or movie
-
-• *Anime Fun:*
- • `/aq` *:* get random anime quotes
-
- """
+"""
 
 ANIME_HANDLER = DisableAbleCommandHandler("anime", anime, run_async=True)
 AIRING_HANDLER = DisableAbleCommandHandler("airing", airing, run_async=True)
@@ -588,15 +557,15 @@ KAIZOKU_SEARCH_HANDLER = DisableAbleCommandHandler("kaizoku", kaizoku, run_async
 KAYO_SEARCH_HANDLER = DisableAbleCommandHandler("kayo", kayo, run_async=True)
 BUTTON_HANDLER = CallbackQueryHandler(button, pattern="anime_.*", run_async=True)
 
-NEKO_PTB.add_handler(BUTTON_HANDLER)
-NEKO_PTB.add_handler(ANIME_HANDLER)
-NEKO_PTB.add_handler(CHARACTER_HANDLER)
-NEKO_PTB.add_handler(MANGA_HANDLER)
-NEKO_PTB.add_handler(AIRING_HANDLER)
-NEKO_PTB.add_handler(USER_HANDLER)
-NEKO_PTB.add_handler(KAIZOKU_SEARCH_HANDLER)
-NEKO_PTB.add_handler(KAYO_SEARCH_HANDLER)
-NEKO_PTB.add_handler(UPCOMING_HANDLER)
+dispatcher.add_handler(BUTTON_HANDLER)
+dispatcher.add_handler(ANIME_HANDLER)
+dispatcher.add_handler(CHARACTER_HANDLER)
+dispatcher.add_handler(MANGA_HANDLER)
+dispatcher.add_handler(AIRING_HANDLER)
+dispatcher.add_handler(USER_HANDLER)
+dispatcher.add_handler(KAIZOKU_SEARCH_HANDLER)
+dispatcher.add_handler(KAYO_SEARCH_HANDLER)
+dispatcher.add_handler(UPCOMING_HANDLER)
 
 __mod_name__ = "Anime"
 __command_list__ = [
@@ -606,8 +575,8 @@ __command_list__ = [
     "user",
     "upcoming",
     "kaizoku",
-    "airing",
     "kayo",
+    "airing",
 ]
 __handlers__ = [
     ANIME_HANDLER,
