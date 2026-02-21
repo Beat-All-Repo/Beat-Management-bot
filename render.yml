@@ -1,37 +1,25 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# render.yml  —  FallenRobot deployment on Render free tier
-#
-# Render's free tier only supports "web" services (not background workers).
-# The bot includes a tiny keep-alive HTTP server so Render keeps it running.
-#
-# Deploy steps:
-#   1. Push this repo to GitHub / GitLab.
-#   2. Go to https://dashboard.render.com → New → Web Service.
-#   3. Connect your repo and Render will detect this file automatically.
-#   4. Fill in the required environment variables marked ⚠ below.
+# render.yml  —  FallenRobot deployment on Render (Docker)
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
-  - type: web                      # Free tier supports "web" only
-    name: fallen-robot
-    runtime: python
-    region: oregon                 # Change to: frankfurt | singapore | ohio
+  - type: web
+    name: Beat-robot
+    runtime: docker               # ← Using Docker instead of Python runtime
+    region: oregon                # Change to: frankfurt | singapore | ohio
     plan: free
+    dockerfilePath: ./Dockerfile  # ← Points to your Dockerfile
 
-    # ── Build ────────────────────────────────────────────────────────────────
-    buildCommand: pip install -r requirements.txt
-
-    # ── Start ────────────────────────────────────────────────────────────────
-    # main.py must start the keep-alive HTTP server (see keepalive.py below)
-    startCommand: python main.py
-
-    # ── Health check (keeps free-tier service alive) ──────────────────────────
+    # ── Health check ──────────────────────────────────────────────────────────
     healthCheckPath: /health
 
-    # ── Environment variables ────────────────────────────────────────────────
+    # ── Environment variables ─────────────────────────────────────────────────
     envVars:
 
-      # ── Required ────────────────────────────────────────────────────────────
+      # ── Required ─────────────────────────────────────────────────────────────
+
+      - key: ENV
+        value: "True"
 
       - key: TOKEN                   # ⚠ Your bot token from @BotFather
         sync: false
@@ -45,65 +33,73 @@ services:
       - key: OWNER_ID                # ⚠ Your Telegram numeric user ID
         sync: false
 
-      # ── Database (at least one required) ─────────────────────────────────
+      # ── Database ──────────────────────────────────────────────────────────────
 
-      - key: DATABASE_URL            # ⚠ PostgreSQL URL (ElephantSQL / Supabase)
-        sync: false                  #   e.g. postgresql://user:pass@host/db
+      - key: DATABASE_URL            # ⚠ Neon PostgreSQL URL
+        sync: false
 
       - key: MONGO_DB_URI            # ⚠ MongoDB Atlas URI
-        sync: false                  #   e.g. mongodb+srv://user:pass@cluster/db
+        sync: false
 
-      # ── Support / Community ───────────────────────────────────────────────
+      # ── Session Strings (REQUIRED for Render) ────────────────────────────────
+
+      - key: TELETHON_SESSION        # ⚠ Generated string session for Telethon
+        sync: false
+
+      - key: PYROGRAM_SESSION        # ⚠ Generated string session for Pyrogram
+        sync: false
+
+      # ── Support ───────────────────────────────────────────────────────────────
 
       - key: SUPPORT_CHAT
-        value: DevilsHeavenMF        # Your support group username (no @)
+        value: DevilsHeavenMF
 
-      - key: EVENT_LOGS              # Channel ID for event logs (optional)
+      - key: EVENT_LOGS              # Your log channel ID
         sync: false
 
-      # ── Optional API keys ────────────────────────────────────────────────
+      # ── Optional API Keys ─────────────────────────────────────────────────────
 
-      - key: CASH_API_KEY            # alphavantage.co — currency converter
+      - key: CASH_API_KEY
         sync: false
 
-      - key: TIME_API_KEY            # timezonedb.com — timezone lookups
+      - key: TIME_API_KEY
         sync: false
 
-      - key: WALL_API_KEY            # alphacoders.com — wallpaper search
+      - key: WALL_API_KEY
         sync: false
 
-      # ── Bot appearance ───────────────────────────────────────────────────
+      # ── Bot Appearance ────────────────────────────────────────────────────────
 
-      - key: START_PICS              # Comma-separated image URLs for /start
+      - key: START_PICS
         sync: false
 
-      - key: HELP_PICS               # Comma-separated image URLs for /help
+      - key: HELP_PICS
         sync: false
 
-      - key: ANIME_CHANNEL           # Your anime channel link
+      - key: ANIME_CHANNEL
         sync: false
 
-      - key: CONTACT_ADMIN           # Admin contact link
+      - key: CONTACT_ADMIN
         sync: false
 
-      # ── Privileged user lists (comma-separated IDs) ───────────────────────
+      # ── Privileged Users ──────────────────────────────────────────────────────
 
-      - key: DRAGONS                 # Sudo user IDs
+      - key: DRAGONS
         sync: false
 
-      - key: DEV_USERS               # Dev user IDs
+      - key: DEV_USERS
         sync: false
 
-      - key: DEMONS                  # Support user IDs
+      - key: DEMONS
         sync: false
 
       - key: TIGERS
         sync: false
 
-      - key: WOLVES                  # Whitelist user IDs
+      - key: WOLVES
         sync: false
 
-      # ── Behaviour flags ──────────────────────────────────────────────────
+      # ── Behaviour Flags ───────────────────────────────────────────────────────
 
       - key: ALLOW_CHATS
         value: "True"
@@ -118,13 +114,11 @@ services:
         value: "True"
 
       - key: WORKERS
-        value: "4"                   # Keep low on free tier (512 MB RAM)
+        value: "4"
 
       - key: TEMP_DOWNLOAD_DIRECTORY
         value: "./"
 
-      # ── Keep-alive / web server ──────────────────────────────────────────
-      # Render injects PORT automatically; no need to set it manually.
-
-      - key: WEBHOOK_URL             # Optional: your Render service URL
-        sync: false                  # e.g. https://fallen-robot.onrender.com
+      # ── Unload Heavy Modules (saves RAM) ──────────────────────────────────────
+      - key: NO_LOAD
+        value: "tagall telegraph backups dbcleanup country"
